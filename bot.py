@@ -19,7 +19,7 @@ logging.basicConfig(
 BOT_TOKEN = "7965094498:AAGI-7eiAqXYkcqh1xmCv4UbG1UZm-0hKOQ"
 
 # Ganti dengan API key dari OpenRouter yang benar
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "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")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "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")
 
 # OpenRouter API URLs
 OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
