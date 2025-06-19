@@ -4,7 +4,10 @@ import requests
 import json
 import os
 import logging
-import urllib.parse
+import re
+import math
+import ast
+import operator
 
 # Setup logging
 logging.basicConfig(
@@ -12,11 +15,22 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-# Bot Token
-BOT_TOKEN = os.getenv("BOT_TOKEN", "7965094498:AAGI-7eiAqXYkcqh1xmCv4UbG1UZm-0hKOQ")
+# Ganti dengan token bot kamu
+BOT_TOKEN = "7965094498:AAGI-7eiAqXYkcqh1xmCv4UbG1UZm-0tE4"
 
-# OpenRouter API Key (bisa kosong, kita akan pakai service gratis)
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
+# Ganti dengan API key dari OpenRouter yang benar
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "sk-or-v1-cc7ba6e5d8606fe228157b47b81d13d8b2c27bddc48b1d1e6c0c8a4e8b4e4a2a1")
+
+# OpenRouter API URLs
+OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+# Headers untuk OpenRouter
+headers = {
+    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+    "Content-Type": "application/json",
+    "HTTP-Referer": "https://github.com/telegram-bot",
+    "X-Title": "Telegram Bot AI"
+}
 
 # Fungsi /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -24,291 +38,337 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Halo {update.effective_user.first_name}! 👋\n\n"
         "🤖 Saya adalah bot AI yang bisa:\n"
         "• Menjawab pertanyaan apapun\n"
-        "• Membuat gambar dengan perintah 'gambar: [deskripsi]'\n\n"
-        "Contoh:\n"
-        "- Pertanyaan: Kenapa langit biru?\n"
-        "- Gambar: gambar: kucing lucu bermain\n\n"
-        "Silakan coba kirim pesan!"
+        "• Menghitung matematika dengan perintah 'hitung: [rumus]'\n\n"
+        "📊 Contoh perhitungan:\n"
+        "• hitung: 2 + 3 * 4\n"
+        "• hitung: sqrt(16) + 2^3\n"
+        "• hitung: sin(30) * cos(45)\n"
+        "• hitung: 15% dari 200\n"
+        "• hitung: akar dari 144\n\n"
+        "Silakan kirim pesan atau minta perhitungan!"
     )
 
-# Fungsi chat dengan Groq (gratis tanpa API key)
-def chat_with_groq(message):
+# Operator matematika yang aman
+safe_operators = {
+    ast.Add: operator.add,
+    ast.Sub: operator.sub,
+    ast.Mult: operator.mul,
+    ast.Div: operator.truediv,
+    ast.Pow: operator.pow,
+    ast.BitXor: operator.xor,
+    ast.USub: operator.neg,
+    ast.UAdd: operator.pos,
+    ast.Mod: operator.mod,
+    ast.FloorDiv: operator.floordiv
+}
+
+# Fungsi matematika yang aman
+safe_functions = {
+    'abs': abs,
+    'round': round,
+    'min': min,
+    'max': max,
+    'sum': sum,
+    'pow': pow,
+    'sqrt': math.sqrt,
+    'sin': math.sin,
+    'cos': math.cos,
+    'tan': math.tan,
+    'asin': math.asin,
+    'acos': math.acos,
+    'atan': math.atan,
+    'log': math.log,
+    'log10': math.log10,
+    'exp': math.exp,
+    'pi': math.pi,
+    'e': math.e,
+    'ceil': math.ceil,
+    'floor': math.floor,
+    'factorial': math.factorial,
+    'degrees': math.degrees,
+    'radians': math.radians
+}
+
+# Fungsi untuk evaluasi matematika yang aman
+def safe_eval(expr):
     try:
-        print(f"🔍 Trying Groq API for: {message[:50]}...")
+        # Parse the expression
+        node = ast.parse(expr, mode='eval')
         
-        # Groq API endpoint (gratis)
-        url = "https://api.groq.com/openai/v1/chat/completions"
+        def _eval(node):
+            if isinstance(node, ast.Expression):
+                return _eval(node.body)
+            elif isinstance(node, ast.Constant):  # Python 3.8+
+                return node.value
+            elif isinstance(node, ast.Num):  # Python < 3.8
+                return node.n
+            elif isinstance(node, ast.BinOp):
+                left = _eval(node.left)
+                right = _eval(node.right)
+                return safe_operators[type(node.op)](left, right)
+            elif isinstance(node, ast.UnaryOp):
+                operand = _eval(node.operand)
+                return safe_operators[type(node.op)](operand)
+            elif isinstance(node, ast.Call):
+                func_name = node.func.id
+                if func_name in safe_functions:
+                    args = [_eval(arg) for arg in node.args]
+                    return safe_functions[func_name](*args)
+                else:
+                    raise ValueError(f"Function '{func_name}' not allowed")
+            elif isinstance(node, ast.Name):
+                if node.id in safe_functions:
+                    return safe_functions[node.id]
+                else:
+                    raise ValueError(f"Name '{node.id}' not allowed")
+            else:
+                raise ValueError(f"Node type {type(node)} not allowed")
         
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": "Bearer gsk_WxYZ1234567890abcdefghijklmnopqrstuvwxyz"  # Dummy key
-        }
+        return _eval(node.body)
+    except Exception as e:
+        raise ValueError(f"Invalid expression: {str(e)}")
+
+# Fungsi untuk preprocessing rumus matematika dalam bahasa Indonesia
+def preprocess_math_expression(expr):
+    # Ganti kata-kata bahasa Indonesia dengan simbol matematika
+    replacements = {
+        r'\bakar\s+dari\s+(\d+(?:\.\d+)?)\b': r'sqrt(\1)',
+        r'\b(\d+(?:\.\d+)?)\s*%\s*dari\s*(\d+(?:\.\d+)?)\b': r'(\1/100)*\2',
+        r'\bpangkat\b': '**',
+        r'\bkali\b': '*',
+        r'\bbagi\b': '/',
+        r'\btambah\b': '+',
+        r'\bkurang\b': '-',
+        r'\bsin\s*(\d+)\b': r'sin(radians(\1))',
+        r'\bcos\s*(\d+)\b': r'cos(radians(\1))',
+        r'\btan\s*(\d+)\b': r'tan(radians(\1))',
+        r'\^': '**',  # Pangkat dengan simbol ^
+        r'x': '*',    # x sebagai perkalian
+    }
+    
+    for pattern, replacement in replacements.items():
+        expr = re.sub(pattern, replacement, expr, flags=re.IGNORECASE)
+    
+    return expr
+
+# Fungsi untuk menghitung matematika
+def calculate_math(expression):
+    try:
+        # Preprocess expression
+        processed_expr = preprocess_math_expression(expression)
+        
+        # Evaluasi menggunakan safe_eval
+        result = safe_eval(processed_expr)
+        
+        # Format hasil
+        if isinstance(result, float):
+            if result.is_integer():
+                return str(int(result))
+            else:
+                return f"{result:.6f}".rstrip('0').rstrip('.')
+        else:
+            return str(result)
+            
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+# Fungsi untuk chat dengan OpenRouter
+def chat_with_openrouter(message):
+    try:
+        print(f"🔍 Sending chat request: {message[:50]}...")
         
         payload = {
-            "model": "llama3-8b-8192",
+            "model": "meta-llama/llama-3.1-8b-instruct:free",  # Model gratis
             "messages": [
-                {"role": "system", "content": "Kamu adalah asisten AI yang ramah. Jawab dalam bahasa Indonesia dengan singkat dan jelas."},
-                {"role": "user", "content": message}
+                {
+                    "role": "system",
+                    "content": "Kamu adalah asisten AI yang ramah dan membantu. Jawab dalam bahasa Indonesia dengan jelas dan informatif."
+                },
+                {
+                    "role": "user", 
+                    "content": message
+                }
             ],
             "temperature": 0.7,
             "max_tokens": 1000
         }
         
-        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        response = requests.post(
+            OPENROUTER_CHAT_URL,
+            headers=headers,
+            json=payload,
+            timeout=30
+        )
         
         if response.status_code == 200:
             result = response.json()
             return result['choices'][0]['message']['content']
         else:
-            print(f"Groq failed: {response.status_code}")
-            return None
+            print(f"❌ Chat API Error: {response.status_code} - {response.text}")
+            # Coba model backup
+            return chat_with_backup_model(message)
             
     except Exception as e:
-        print(f"Groq error: {e}")
+        print(f"❌ Chat Exception: {e}")
         return None
 
-# Fungsi chat dengan API gratis lainnya
-def chat_with_free_api(message):
+# Fungsi backup dengan model gratis lain
+def chat_with_backup_model(message):
     try:
-        print(f"🔍 Trying free API for: {message[:50]}...")
-        
-        # Menggunakan Hugging Face Inference API (gratis)
-        url = "https://api-inference.huggingface.co/models/microsoft/DialoGPT-medium"
-        
-        headers = {
-            "Content-Type": "application/json"
-        }
+        print("🔄 Trying backup model...")
         
         payload = {
-            "inputs": message,
-            "parameters": {
-                "max_length": 500,
-                "temperature": 0.7
-            }
+            "model": "google/gemma-2-9b-it:free",
+            "messages": [
+                {
+                    "role": "user", 
+                    "content": f"Jawab dalam bahasa Indonesia: {message}"
+                }
+            ],
+            "temperature": 0.7,
+            "max_tokens": 500
         }
         
-        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        response = requests.post(
+            OPENROUTER_CHAT_URL,
+            headers=headers,
+            json=payload,
+            timeout=30
+        )
         
         if response.status_code == 200:
             result = response.json()
-            if isinstance(result, list) and len(result) > 0:
-                return result[0].get('generated_text', '').replace(message, '').strip()
-        
-        return None
-        
-    except Exception as e:
-        print(f"Free API error: {e}")
-        return None
-
-# Fungsi chat dengan respons default
-def get_default_response(message):
-    """Memberikan respons default berdasarkan kata kunci"""
-    message_lower = message.lower()
-    
-    # Respons untuk pertanyaan umum
-    if any(word in message_lower for word in ['halo', 'hai', 'hello', 'hi']):
-        return "Halo! Ada yang bisa saya bantu? 😊"
-    
-    elif any(word in message_lower for word in ['apa kabar', 'how are you']):
-        return "Saya baik-baik saja, terima kasih! Bagaimana dengan Anda? 😊"
-    
-    elif any(word in message_lower for word in ['bumi', 'bulat', 'earth']):
-        return """Bumi berbentuk bulat (lebih tepatnya oblate spheroid) karena beberapa alasan:
-
-1. **Gravitasi**: Gaya gravitasi menarik semua massa ke arah pusat, membentuk bentuk yang paling efisien yaitu bola.
-
-2. **Rotasi**: Bumi berputar pada porosnya, sehingga sedikit "gepeng" di kutub dan mengembang di khatulistiwa.
-
-3. **Keseimbangan hidrostatik**: Massa yang besar seperti planet akan membentuk bentuk bulat karena gravitasinya sendiri.
-
-Bentuk bulat adalah bentuk alami untuk benda langit yang memiliki massa besar! 🌍"""
-    
-    elif any(word in message_lower for word in ['langit', 'biru', 'sky', 'blue']):
-        return """Langit terlihat biru karena fenomena yang disebut "Rayleigh scattering":
-
-🌞 Cahaya matahari terdiri dari berbagai warna (spektrum)
-🔵 Cahaya biru memiliki panjang gelombang yang lebih pendek
-✨ Molekul-molekul di atmosfer lebih banyak memantulkan cahaya biru
-🌍 Sehingga mata kita melihat langit berwarna biru
-
-Saat matahari terbenam, langit jadi merah/orange karena cahaya harus melewati atmosfer yang lebih tebal! 🌅"""
-    
-    elif any(word in message_lower for word in ['nama', 'siapa', 'who', 'name']):
-        return "Saya adalah bot AI yang dibuat untuk membantu menjawab pertanyaan dan membuat gambar. Senang berkenalan dengan Anda! 🤖"
-    
-    elif any(word in message_lower for word in ['terima kasih', 'thanks', 'thank you']):
-        return "Sama-sama! Senang bisa membantu Anda 😊"
-    
-    else:
-        return f"""Maaf, saya belum bisa memberikan jawaban yang spesifik untuk pertanyaan: "{message}"
-
-Tapi saya bisa membantu dengan:
-• Pertanyaan umum tentang sains dan pengetahuan
-• Membuat gambar dengan perintah "gambar: [deskripsi]"
-• Obrolan ringan
-
-Coba tanya hal lain atau minta saya buat gambar! 😊"""
-
-# Fungsi untuk generate gambar gratis
-def generate_image_free(prompt):
-    try:
-        print(f"🎨 Generating image for: {prompt}")
-        
-        # Menggunakan Pollinations AI (gratis, tidak perlu API key)
-        encoded_prompt = urllib.parse.quote(f"high quality, detailed, {prompt}")
-        
-        # Variasi URL untuk gambar yang berbeda
-        import random
-        seed = random.randint(1, 10000)
-        
-        image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&seed={seed}&enhance=true"
-        
-        # Test apakah URL bisa diakses
-        test_response = requests.head(image_url, timeout=10)
-        if test_response.status_code == 200:
-            print("✅ Image generated successfully")
-            return image_url
+            return result['choices'][0]['message']['content']
         else:
-            # Coba service alternatif
-            return generate_image_alternative(prompt)
+            return None
             
     except Exception as e:
-        print(f"❌ Image generation error: {e}")
-        return generate_image_alternative(prompt)
-
-# Service gambar alternatif
-def generate_image_alternative(prompt):
-    try:
-        # Menggunakan Craiyon API (gratis)
-        encoded_prompt = urllib.parse.quote(prompt)
-        
-        # Picsum untuk placeholder (jika perlu)
-        backup_url = f"https://picsum.photos/1024/1024?random={hash(prompt) % 1000}"
-        
-        # Untuk demo, kita return Pollinations dengan parameter berbeda
-        image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=512&height=512&model=flux&enhance=false"
-        
-        return image_url
-        
-    except Exception as e:
-        print(f"Alternative image error: {e}")
+        print(f"❌ Backup model exception: {e}")
         return None
 
 # Fungsi balas semua pesan
 async def balas(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pesan = update.message.text.strip()
     
-    print(f"📨 Received message: {pesan}")
-    
-    # Cek apakah pesan untuk generate gambar
-    if pesan.lower().startswith("gambar:") or pesan.lower().startswith("gambar :"):
-        # Extract prompt
-        if ":" in pesan:
-            prompt = pesan.split(":", 1)[1].strip()
-        else:
-            prompt = pesan.replace("gambar", "").strip()
+    # Cek apakah pesan untuk perhitungan matematika
+    if pesan.lower().startswith("hitung:"):
+        expression = pesan[7:].strip()
         
-        if not prompt:
-            await update.message.reply_text("❌ Mohon berikan deskripsi gambar!\nContoh: gambar: kucing lucu")
+        if not expression:
+            await update.message.reply_text(
+                "❌ Mohon berikan rumus yang ingin dihitung!\n\n"
+                "📊 Contoh:\n"
+                "• hitung: 2 + 3 * 4\n"
+                "• hitung: sqrt(16) + 2^3\n"
+                "• hitung: sin(30) * cos(45)\n"
+                "• hitung: 15% dari 200\n"
+                "• hitung: akar dari 144"
+            )
             return
         
-        # Kirim pesan loading
-        loading_message = await update.message.reply_text("🎨 Sedang membuat gambar... Mohon tunggu!")
+        # Kirim typing indicator
+        await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
         
-        try:
-            image_url = generate_image_free(prompt)
-            
-            if image_url:
-                # Hapus pesan loading
-                await loading_message.delete()
-                
-                # Kirim gambar
-                await update.message.reply_photo(
-                    image_url,
-                    caption=f"🎨 Gambar berhasil dibuat!\n📝 Prompt: {prompt}"
-                )
-            else:
-                await loading_message.edit_text("❌ Maaf, gagal membuat gambar. Coba lagi dengan deskripsi yang berbeda!")
-                
-        except Exception as e:
-            print(f"Image error: {e}")
-            try:
-                await loading_message.edit_text("❌ Maaf, terjadi kesalahan saat membuat gambar.")
-            except:
-                await update.message.reply_text("❌ Maaf, terjadi kesalahan saat membuat gambar.")
+        # Hitung matematika
+        result = calculate_math(expression)
+        
+        if result.startswith("Error:"):
+            await update.message.reply_text(f"❌ {result}\n\nPastikan rumus matematika Anda benar!")
+        else:
+            await update.message.reply_text(
+                f"🧮 **Hasil Perhitungan:**\n\n"
+                f"📝 Rumus: `{expression}`\n"
+                f"✅ Hasil: **{result}**",
+                parse_mode='Markdown'
+            )
     
-    # Jika bukan perintah gambar, jawab dengan chat
+    # Jika bukan perintah hitung, jawab dengan chat AI
     else:
         # Kirim typing indicator
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
         
         try:
-            # Coba beberapa metode chat
-            jawaban = None
+            jawaban = chat_with_openrouter(pesan)
             
-            # Method 1: Groq API
-            if not jawaban:
-                jawaban = chat_with_groq(pesan)
-            
-            # Method 2: Free API
-            if not jawaban:
-                jawaban = chat_with_free_api(pesan)
-            
-            # Method 3: Default responses
-            if not jawaban:
-                jawaban = get_default_response(pesan)
-            
-            # Kirim jawaban
             if jawaban:
-                # Split pesan jika terlalu panjang
+                # Split pesan jika terlalu panjang (Telegram limit 4096 karakter)
                 if len(jawaban) > 4096:
                     for i in range(0, len(jawaban), 4096):
                         await update.message.reply_text(jawaban[i:i+4096])
                 else:
                     await update.message.reply_text(jawaban)
             else:
-                await update.message.reply_text("❌ Maaf, saya tidak bisa memproses pesan ini sekarang. Coba lagi nanti!")
+                await update.message.reply_text("❌ Maaf, gagal menjawab pertanyaan. Coba lagi nanti!")
                 
         except Exception as e:
             print(f"Chat error: {e}")
-            await update.message.reply_text("❌ Terjadi kesalahan. Coba kirim pesan lagi!")
+            await update.message.reply_text("❌ Maaf, terjadi kesalahan. Coba lagi nanti!")
 
 # Error handler
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    print(f"❌ Update {update} caused error {context.error}")
+    logging.error(f"Update {update} caused error {context.error}")
     
+    # Kirim pesan error ke user jika memungkinkan
     if update and update.message:
         try:
-            await update.message.reply_text("❌ Terjadi kesalahan sistem. Silakan coba lagi!")
+            await update.message.reply_text("❌ Terjadi kesalahan sistem. Coba lagi nanti!")
         except:
             pass
 
-# Test fungsi
-def test_connection():
-    print("🧪 Testing services...")
+# Fungsi untuk testing koneksi
+def test_openrouter_connection():
+    try:
+        print("🔍 Testing OpenRouter API key...")
+        
+        test_payload = {
+            "model": "meta-llama/llama-3.1-8b-instruct:free",
+            "messages": [{"role": "user", "content": "Hello"}],
+            "max_tokens": 10
+        }
+        
+        response = requests.post(
+            OPENROUTER_CHAT_URL,
+            headers=headers,
+            json=test_payload,
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            print("✅ OpenRouter connection successful!")
+            return True
+        else:
+            print(f"❌ OpenRouter connection failed: {response.status_code}")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Connection test error: {e}")
+        return False
+
+# Test fungsi matematika
+def test_calculator():
+    print("🧮 Testing calculator functions...")
+    test_cases = [
+        "2 + 3 * 4",
+        "sqrt(16) + 2**3",
+        "15% dari 200",
+        "akar dari 144",
+        "sin(30) + cos(45)"
+    ]
     
-    # Test image generation
-    print("Testing image generation...")
-    test_image = generate_image_free("test image")
-    if test_image:
-        print(f"✅ Image service OK: {test_image}")
-    else:
-        print("❌ Image service failed")
-    
-    # Test chat
-    print("Testing chat...")
-    test_chat = get_default_response("hello")
-    if test_chat:
-        print(f"✅ Chat service OK")
-    else:
-        print("❌ Chat service failed")
+    for test in test_cases:
+        result = calculate_math(test)
+        print(f"  {test} = {result}")
 
 # Run bot
 if __name__ == '__main__':
-    print("🚀 Starting Telegram Bot...")
+    print("🚀 Starting Telegram Calculator Bot...")
     
-    # Test koneksi
-    test_connection()
+    # Test kalkulator
+    test_calculator()
+    
+    # Test koneksi OpenRouter
+    print("🔍 Testing OpenRouter connection...")
+    test_openrouter_connection()
     
     # Setup bot
     app = ApplicationBuilder().token(BOT_TOKEN).build()
@@ -318,11 +378,10 @@ if __name__ == '__main__':
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, balas))
     app.add_error_handler(error_handler)
 
-    print("✅ Bot siap menjawab & membuat gambar!")
-    print("📝 Fitur:")
-    print("   - Chat AI dengan fallback responses")
-    print("   - Generate gambar gratis dengan Pollinations AI")
-    print("   - Error handling yang robust")
+    print("✅ Bot siap menjawab & menghitung!")
+    print("📝 Perintah:")
+    print("   - Kirim pesan biasa untuk chat")
+    print("   - Kirim 'hitung: [rumus]' untuk perhitungan matematika")
     
     # Start bot
     app.run_polling()
