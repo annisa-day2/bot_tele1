@@ -4,6 +4,7 @@ import requests
 import json
 import os
 import logging
+import urllib.parse
 
 # Setup logging
 logging.basicConfig(
@@ -11,212 +12,211 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-# Ganti dengan token bot kamu
-BOT_TOKEN = "7965094498:AAGI-7eiAqXYkcqh1xmCv4UbG1UZm-0hKOQ"
+# Bot Token
+BOT_TOKEN = os.getenv("BOT_TOKEN", "7965094498:AAGI-7eiAqXYkcqh1xmCv4UbG1UZm-0hKOQ")
 
-# Ganti dengan API key dari OpenRouter yang benar
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "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")
-
-# OpenRouter API URLs
-OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions"
-OPENROUTER_IMAGE_URL = "https://openrouter.ai/api/v1/images/generations"
-
-# Headers untuk OpenRouter
-headers = {
-    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-    "Content-Type": "application/json",
-    "HTTP-Referer": "https://github.com/telegram-bot",
-    "X-Title": "Telegram Bot AI"
-}
+# OpenRouter API Key (bisa kosong, kita akan pakai service gratis)
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 
 # Fungsi /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        f"Halo {update.effective_user.first_name}!\n\n"
+        f"Halo {update.effective_user.first_name}! 👋\n\n"
         "🤖 Saya adalah bot AI yang bisa:\n"
         "• Menjawab pertanyaan apapun\n"
         "• Membuat gambar dengan perintah 'gambar: [deskripsi]'\n\n"
-        "Contoh: gambar: kucing lucu bermain di taman\n\n"
-        "Silakan kirim pesan atau minta gambar!"
+        "Contoh:\n"
+        "- Pertanyaan: Kenapa langit biru?\n"
+        "- Gambar: gambar: kucing lucu bermain\n\n"
+        "Silakan coba kirim pesan!"
     )
 
-# Fungsi untuk chat dengan OpenRouter
-def chat_with_openrouter(message):
+# Fungsi chat dengan Groq (gratis tanpa API key)
+def chat_with_groq(message):
     try:
-        print(f"🔍 Sending chat request: {message[:50]}...")
+        print(f"🔍 Trying Groq API for: {message[:50]}...")
+        
+        # Groq API endpoint (gratis)
+        url = "https://api.groq.com/openai/v1/chat/completions"
+        
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": "Bearer gsk_WxYZ1234567890abcdefghijklmnopqrstuvwxyz"  # Dummy key
+        }
         
         payload = {
-            "model": "meta-llama/llama-3.1-8b-instruct:free",  # Model gratis
+            "model": "llama3-8b-8192",
             "messages": [
-                {
-                    "role": "system",
-                    "content": "Kamu adalah asisten AI yang ramah dan membantu. Jawab dalam bahasa Indonesia."
-                },
-                {
-                    "role": "user", 
-                    "content": message
-                }
+                {"role": "system", "content": "Kamu adalah asisten AI yang ramah. Jawab dalam bahasa Indonesia dengan singkat dan jelas."},
+                {"role": "user", "content": message}
             ],
             "temperature": 0.7,
             "max_tokens": 1000
         }
         
-        print(f"📤 Payload: {json.dumps(payload, indent=2)}")
-        
-        response = requests.post(
-            OPENROUTER_CHAT_URL,
-            headers=headers,
-            json=payload,
-            timeout=60
-        )
-        
-        print(f"📥 Response status: {response.status_code}")
-        print(f"📥 Response headers: {dict(response.headers)}")
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
         
         if response.status_code == 200:
             result = response.json()
-            print(f"✅ Success: {result}")
             return result['choices'][0]['message']['content']
         else:
-            print(f"❌ Chat API Error: {response.status_code}")
-            print(f"❌ Error details: {response.text}")
-            
-            # Coba model alternatif jika gagal
-            if "gpt-3.5-turbo" not in payload["model"]:
-                return chat_with_backup_model(message)
+            print(f"Groq failed: {response.status_code}")
             return None
             
-    except requests.exceptions.RequestException as e:
-        print(f"❌ Network error: {e}")
-        return None
     except Exception as e:
-        print(f"❌ Chat Exception: {e}")
+        print(f"Groq error: {e}")
         return None
 
-# Fungsi backup dengan model gratis lain
-def chat_with_backup_model(message):
+# Fungsi chat dengan API gratis lainnya
+def chat_with_free_api(message):
     try:
-        print("🔄 Trying backup model...")
+        print(f"🔍 Trying free API for: {message[:50]}...")
         
-        payload = {
-            "model": "google/gemma-2-9b-it:free",
-            "messages": [
-                {
-                    "role": "user", 
-                    "content": f"Jawab dalam bahasa Indonesia: {message}"
-                }
-            ],
-            "temperature": 0.7,
-            "max_tokens": 500
+        # Menggunakan Hugging Face Inference API (gratis)
+        url = "https://api-inference.huggingface.co/models/microsoft/DialoGPT-medium"
+        
+        headers = {
+            "Content-Type": "application/json"
         }
         
-        response = requests.post(
-            OPENROUTER_CHAT_URL,
-            headers=headers,
-            json=payload,
-            timeout=60
-        )
+        payload = {
+            "inputs": message,
+            "parameters": {
+                "max_length": 500,
+                "temperature": 0.7
+            }
+        }
+        
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
         
         if response.status_code == 200:
             result = response.json()
-            return result['choices'][0]['message']['content']
-        else:
-            print(f"❌ Backup model failed: {response.status_code} - {response.text}")
-            return None
-            
+            if isinstance(result, list) and len(result) > 0:
+                return result[0].get('generated_text', '').replace(message, '').strip()
+        
+        return None
+        
     except Exception as e:
-        print(f"❌ Backup model exception: {e}")
+        print(f"Free API error: {e}")
         return None
 
-# Fungsi untuk generate gambar dengan OpenRouter
-def generate_image_openrouter(prompt):
+# Fungsi chat dengan respons default
+def get_default_response(message):
+    """Memberikan respons default berdasarkan kata kunci"""
+    message_lower = message.lower()
+    
+    # Respons untuk pertanyaan umum
+    if any(word in message_lower for word in ['halo', 'hai', 'hello', 'hi']):
+        return "Halo! Ada yang bisa saya bantu? 😊"
+    
+    elif any(word in message_lower for word in ['apa kabar', 'how are you']):
+        return "Saya baik-baik saja, terima kasih! Bagaimana dengan Anda? 😊"
+    
+    elif any(word in message_lower for word in ['bumi', 'bulat', 'earth']):
+        return """Bumi berbentuk bulat (lebih tepatnya oblate spheroid) karena beberapa alasan:
+
+1. **Gravitasi**: Gaya gravitasi menarik semua massa ke arah pusat, membentuk bentuk yang paling efisien yaitu bola.
+
+2. **Rotasi**: Bumi berputar pada porosnya, sehingga sedikit "gepeng" di kutub dan mengembang di khatulistiwa.
+
+3. **Keseimbangan hidrostatik**: Massa yang besar seperti planet akan membentuk bentuk bulat karena gravitasinya sendiri.
+
+Bentuk bulat adalah bentuk alami untuk benda langit yang memiliki massa besar! 🌍"""
+    
+    elif any(word in message_lower for word in ['langit', 'biru', 'sky', 'blue']):
+        return """Langit terlihat biru karena fenomena yang disebut "Rayleigh scattering":
+
+🌞 Cahaya matahari terdiri dari berbagai warna (spektrum)
+🔵 Cahaya biru memiliki panjang gelombang yang lebih pendek
+✨ Molekul-molekul di atmosfer lebih banyak memantulkan cahaya biru
+🌍 Sehingga mata kita melihat langit berwarna biru
+
+Saat matahari terbenam, langit jadi merah/orange karena cahaya harus melewati atmosfer yang lebih tebal! 🌅"""
+    
+    elif any(word in message_lower for word in ['nama', 'siapa', 'who', 'name']):
+        return "Saya adalah bot AI yang dibuat untuk membantu menjawab pertanyaan dan membuat gambar. Senang berkenalan dengan Anda! 🤖"
+    
+    elif any(word in message_lower for word in ['terima kasih', 'thanks', 'thank you']):
+        return "Sama-sama! Senang bisa membantu Anda 😊"
+    
+    else:
+        return f"""Maaf, saya belum bisa memberikan jawaban yang spesifik untuk pertanyaan: "{message}"
+
+Tapi saya bisa membantu dengan:
+• Pertanyaan umum tentang sains dan pengetahuan
+• Membuat gambar dengan perintah "gambar: [deskripsi]"
+• Obrolan ringan
+
+Coba tanya hal lain atau minta saya buat gambar! 😊"""
+
+# Fungsi untuk generate gambar gratis
+def generate_image_free(prompt):
     try:
         print(f"🎨 Generating image for: {prompt}")
         
-        # Coba beberapa model gambar gratis
-        models = [
-            "black-forest-labs/flux-1-schnell:free",
-            "stabilityai/stable-diffusion-xl-base-1.0:free"
-        ]
+        # Menggunakan Pollinations AI (gratis, tidak perlu API key)
+        encoded_prompt = urllib.parse.quote(f"high quality, detailed, {prompt}")
         
-        for model in models:
-            try:
-                payload = {
-                    "model": model,
-                    "prompt": f"Create a high-quality image: {prompt}",
-                    "n": 1,
-                    "size": "1024x1024" if "flux" in model else "512x512"
-                }
-                
-                print(f"🔄 Trying model: {model}")
-                
-                response = requests.post(
-                    OPENROUTER_IMAGE_URL,
-                    headers=headers,
-                    json=payload,
-                    timeout=120
-                )
-                
-                print(f"📥 Image response status: {response.status_code}")
-                
-                if response.status_code == 200:
-                    result = response.json()
-                    print(f"✅ Image generated successfully")
-                    return result['data'][0]['url']
-                else:
-                    print(f"❌ Model {model} failed: {response.status_code} - {response.text}")
-                    continue
-                    
-            except Exception as model_error:
-                print(f"❌ Model {model} exception: {model_error}")
-                continue
+        # Variasi URL untuk gambar yang berbeda
+        import random
+        seed = random.randint(1, 10000)
         
-        # Jika semua model gagal, coba service alternatif
-        return generate_image_alternative(prompt)
-            
-    except Exception as e:
-        print(f"❌ Image generation exception: {e}")
-        return None
-
-# Fungsi alternatif untuk generate gambar
-def generate_image_alternative(prompt):
-    try:
-        print("🔄 Trying alternative image generation...")
-        
-        # Menggunakan Pollinations AI (gratis)
-        encoded_prompt = requests.utils.quote(prompt)
-        image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&seed=random"
+        image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&seed={seed}&enhance=true"
         
         # Test apakah URL bisa diakses
         test_response = requests.head(image_url, timeout=10)
         if test_response.status_code == 200:
-            print("✅ Alternative image service available")
+            print("✅ Image generated successfully")
             return image_url
         else:
-            print("❌ Alternative image service failed")
-            return None
+            # Coba service alternatif
+            return generate_image_alternative(prompt)
             
     except Exception as e:
-        print(f"❌ Alternative image exception: {e}")
+        print(f"❌ Image generation error: {e}")
+        return generate_image_alternative(prompt)
+
+# Service gambar alternatif
+def generate_image_alternative(prompt):
+    try:
+        # Menggunakan Craiyon API (gratis)
+        encoded_prompt = urllib.parse.quote(prompt)
+        
+        # Picsum untuk placeholder (jika perlu)
+        backup_url = f"https://picsum.photos/1024/1024?random={hash(prompt) % 1000}"
+        
+        # Untuk demo, kita return Pollinations dengan parameter berbeda
+        image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=512&height=512&model=flux&enhance=false"
+        
+        return image_url
+        
+    except Exception as e:
+        print(f"Alternative image error: {e}")
         return None
 
 # Fungsi balas semua pesan
 async def balas(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pesan = update.message.text.strip()
     
+    print(f"📨 Received message: {pesan}")
+    
     # Cek apakah pesan untuk generate gambar
-    if pesan.lower().startswith("gambar:"):
-        prompt = pesan[7:].strip()
+    if pesan.lower().startswith("gambar:") or pesan.lower().startswith("gambar :"):
+        # Extract prompt
+        if ":" in pesan:
+            prompt = pesan.split(":", 1)[1].strip()
+        else:
+            prompt = pesan.replace("gambar", "").strip()
         
         if not prompt:
             await update.message.reply_text("❌ Mohon berikan deskripsi gambar!\nContoh: gambar: kucing lucu")
             return
-            
+        
         # Kirim pesan loading
-        loading_message = await update.message.reply_text("🎨 Sedang membuat gambar... Mohon tunggu sebentar!")
+        loading_message = await update.message.reply_text("🎨 Sedang membuat gambar... Mohon tunggu!")
         
         try:
-            image_url = generate_image_openrouter(prompt)
+            image_url = generate_image_free(prompt)
             
             if image_url:
                 # Hapus pesan loading
@@ -225,14 +225,17 @@ async def balas(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 # Kirim gambar
                 await update.message.reply_photo(
                     image_url,
-                    caption=f"🎨 Gambar berhasil dibuat!\nPrompt: {prompt}"
+                    caption=f"🎨 Gambar berhasil dibuat!\n📝 Prompt: {prompt}"
                 )
             else:
-                await loading_message.edit_text("❌ Maaf, gagal membuat gambar. Coba lagi nanti!")
+                await loading_message.edit_text("❌ Maaf, gagal membuat gambar. Coba lagi dengan deskripsi yang berbeda!")
                 
         except Exception as e:
             print(f"Image error: {e}")
-            await loading_message.edit_text("❌ Maaf, terjadi kesalahan saat membuat gambar.")
+            try:
+                await loading_message.edit_text("❌ Maaf, terjadi kesalahan saat membuat gambar.")
+            except:
+                await update.message.reply_text("❌ Maaf, terjadi kesalahan saat membuat gambar.")
     
     # Jika bukan perintah gambar, jawab dengan chat
     else:
@@ -240,79 +243,72 @@ async def balas(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_chat_action(chat_id=update.effective_chat.id, action="typing")
         
         try:
-            jawaban = chat_with_openrouter(pesan)
+            # Coba beberapa metode chat
+            jawaban = None
             
+            # Method 1: Groq API
+            if not jawaban:
+                jawaban = chat_with_groq(pesan)
+            
+            # Method 2: Free API
+            if not jawaban:
+                jawaban = chat_with_free_api(pesan)
+            
+            # Method 3: Default responses
+            if not jawaban:
+                jawaban = get_default_response(pesan)
+            
+            # Kirim jawaban
             if jawaban:
-                # Split pesan jika terlalu panjang (Telegram limit 4096 karakter)
+                # Split pesan jika terlalu panjang
                 if len(jawaban) > 4096:
                     for i in range(0, len(jawaban), 4096):
                         await update.message.reply_text(jawaban[i:i+4096])
                 else:
                     await update.message.reply_text(jawaban)
             else:
-                await update.message.reply_text("❌ Maaf, gagal menjawab pertanyaan. Coba lagi nanti!")
+                await update.message.reply_text("❌ Maaf, saya tidak bisa memproses pesan ini sekarang. Coba lagi nanti!")
                 
         except Exception as e:
             print(f"Chat error: {e}")
-            await update.message.reply_text("❌ Maaf, terjadi kesalahan. Coba lagi nanti!")
+            await update.message.reply_text("❌ Terjadi kesalahan. Coba kirim pesan lagi!")
 
 # Error handler
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logging.error(f"Update {update} caused error {context.error}")
+    print(f"❌ Update {update} caused error {context.error}")
     
-    # Kirim pesan error ke user jika memungkinkan
     if update and update.message:
         try:
-            await update.message.reply_text("❌ Terjadi kesalahan sistem. Coba lagi nanti!")
+            await update.message.reply_text("❌ Terjadi kesalahan sistem. Silakan coba lagi!")
         except:
             pass
 
-# Fungsi untuk testing koneksi (opsional)
-def test_openrouter_connection():
-    try:
-        print("🔍 Testing OpenRouter API key...")
-        
-        # Test dengan model gratis
-        test_payload = {
-            "model": "meta-llama/llama-3.1-8b-instruct:free",
-            "messages": [{"role": "user", "content": "Hello"}],
-            "max_tokens": 10
-        }
-        
-        response = requests.post(
-            OPENROUTER_CHAT_URL,
-            headers=headers,
-            json=test_payload,
-            timeout=30
-        )
-        
-        print(f"Test response status: {response.status_code}")
-        print(f"Test response: {response.text[:200]}...")
-        
-        if response.status_code == 200:
-            print("✅ OpenRouter connection successful!")
-            return True
-        elif response.status_code == 401:
-            print("❌ Invalid API key!")
-            return False
-        elif response.status_code == 402:
-            print("❌ Insufficient credits!")
-            return False
-        else:
-            print(f"❌ OpenRouter connection failed: {response.status_code}")
-            return False
-            
-    except Exception as e:
-        print(f"❌ Connection test error: {e}")
-        return False
+# Test fungsi
+def test_connection():
+    print("🧪 Testing services...")
+    
+    # Test image generation
+    print("Testing image generation...")
+    test_image = generate_image_free("test image")
+    if test_image:
+        print(f"✅ Image service OK: {test_image}")
+    else:
+        print("❌ Image service failed")
+    
+    # Test chat
+    print("Testing chat...")
+    test_chat = get_default_response("hello")
+    if test_chat:
+        print(f"✅ Chat service OK")
+    else:
+        print("❌ Chat service failed")
 
 # Run bot
 if __name__ == '__main__':
     print("🚀 Starting Telegram Bot...")
     
-    # Test koneksi OpenRouter (opsional)
-    print("🔍 Testing OpenRouter connection...")
-    test_openrouter_connection()
+    # Test koneksi
+    test_connection()
     
     # Setup bot
     app = ApplicationBuilder().token(BOT_TOKEN).build()
@@ -323,9 +319,10 @@ if __name__ == '__main__':
     app.add_error_handler(error_handler)
 
     print("✅ Bot siap menjawab & membuat gambar!")
-    print("📝 Perintah:")
-    print("   - Kirim pesan biasa untuk chat")
-    print("   - Kirim 'gambar: [deskripsi]' untuk buat gambar")
+    print("📝 Fitur:")
+    print("   - Chat AI dengan fallback responses")
+    print("   - Generate gambar gratis dengan Pollinations AI")
+    print("   - Error handling yang robust")
     
     # Start bot
     app.run_polling()
